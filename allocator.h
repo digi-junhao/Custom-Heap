@@ -1,0 +1,20 @@
+#ifndef _ALLOCATOR_H_
+#define _ALLOCATOR_H_
+
+//include libraries
+#include <stdio.h>
+#include <string.h>
+#include <sys/mman.h>
+
+//define constants
+#define MEM_SIZE (2 * 1024 * 1024)
+
+void *get_mem_block(void *addr, size_t mem_size);
+void *smalloc(int byte_count);
+void sfree(void* memptr);
+
+void allocator_list_dump(void);
+size_t allocator_free_mem_size(void);
+size_t allocator_req_mem(size_t failed_allocation_size);
+
+#endif
