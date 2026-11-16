@@ -95,9 +95,14 @@ void insert_at_head(common_header_t *node)
 // function for finding best node to create memory
 common_header_t *find_best_listnode(int byte_count, common_header_t **previous_head)
 {
+
+    //The temporary pointers so we can interrate through list
+    //Temporary pointers become actual pointers if the coniditons are satisfied
     common_header_t *temp = list_head;
-    common_header_t *temp_previous = NULL; // node before temp during the walk
-    common_header_t *final = NULL;         // smallest node found that fits
+    common_header_t *temp_previous = NULL; 
+    
+    //The actual pointers of current and previous nodes that are returned
+    common_header_t *final = NULL;         
     *previous_head = NULL;
 
     while (temp != NULL)
@@ -118,6 +123,6 @@ common_header_t *find_best_listnode(int byte_count, common_header_t **previous_h
 
 //function for merging adjacent free memory spaces
 
-merge 
+//merge 
 
 

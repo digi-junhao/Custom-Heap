@@ -1,11 +1,10 @@
-
-# Task 1 – Implement and Test Version 1
+# Task 1/2 – Implement and Test Version 1
 
 The aim of this task was to build our own versions of `malloc` and `free`, called `smalloc` and `sfree`, to virtually dynamically allocate and deallocate memory on the heap.
 
-Our allocator works by intially requesting one large contiguous block of virtual memory from the operating system using `mmap()`. Each subsequent call to `smalloc()` allocates a sub-block from this region, with the size determined by the number of bytes requested by the caller. As memory is constantly allocated and deallocated, the original region becomes divided into allocated and free sub-blocks of different sizes, meaning the free memory is not one contiguous block but `fragamented`. Too keep track of available memory, we use the data structure `free list`, which is a linked list storing information about each sub-block such as it's memory address, and the size of free memory available.
+Our allocator works by intially requesting one large contiguous block of virtual memory from the operating system using `mmap()`. Each subsequent call to `smalloc()` allocates a sub-block from this region, with the size determined by the number of bytes requested by the caller. As memory is constantly allocated and deallocated, the original region becomes divided into allocated and free sub-blocks of different sizes, meaning the free memory is not one contiguous block but is `fragmented`. To keep track of available memory, we use the data structure `free list`, which is a linked list storing information about each sub-block such as it's memory address, and the size of free memory available.
 
-When `smalloc()` is called, the allocator searches the free list for a block large enough, and if a block is found, it can be split, giving a portion to the caller and any remaing space to the linked list. Similarly, when `sfree()` is called, the previously allocated block is returned to the free list so that it can be reused by future allocation requests. 
+When `smalloc()` is called, the allocator searches the free list for a block large enough, and if a block is found, it can be split, giving a portion to the caller and any remaining space to the linked list. Similarly, when `sfree()` is called, the previously allocated block is returned to the free list so that it can be reused by future allocation requests. 
 
 Adjacent free blocks can also be merged together to form larger free regions, helping to reduce memory fragmentation.
 
@@ -36,8 +35,8 @@ void *get_mem_block(void *addr, size_t mem_size)
 
 ```
 
--   We used `mmap()`, a system call that maps a new region of memory into the process's address space. It is normally used to map files into memory, but we used the `MAP_ANONYMOUS` flag so the memory was not backed by any file, which gave us a block of empty memory.
--   We passed `NULL` as the address so the kernel the starting address for the memory
+-   We used `mmap()`, a system call that maps a new region of memory into the process's address space. It is normally used to map files into memory, but we used the `MAP_ANONYMOUS` flag so the memory was not backed by any file, which gave us a block of uninitialised memory.
+-   We passed `NULL` as the address so the kernel could choose the starting address for the memory
 -   We used `PROT_READ | PROT_WRITE` so the program could read and write the memory, and `MAP_PRIVATE` so the memory belonged only to this process.
 -   Because no file was used, we set the file descriptor to `-1` and the offset to `0`.
 
@@ -55,8 +54,8 @@ void init_free_list(void *mem, size_t mem_size)
 }
 
 ```
--   Every block of memory, free or allocated, begins with with a `common_header_t` header. It stores the number of bytes of data the block could hold and, a pointer to the next node of the freelist.
--   The assignment stated that the header took up 8 bytes, as the pointer and integer variable within the struct both have a width of 4 bytes. This is only true on a typical 32-bit system, as on a 64-bit system the pointer takes up 8 bytes, int takes up 4 bytes and an additional 4 bytes of padding, totalling the header to 16 bytes. To account for this difference, we used `sizeof(common_header_t)` throughout the code, so our allocator could work across both 32-bit and 64-bit systems.
+-   Every block of memory, free or allocated, begins with a `common_header_t` header. It stores the number of bytes of data the block could hold and, a pointer to the next node of the freelist.
+-   The assignment stated that the header took up 8 bytes, as the pointer and integer variable within the struct both have a width of 4 bytes. This is only true on a typical 32-bit system, as on a 64-bit system the pointer takes up 8 bytes, int takes up 4 bytes and an additional 4 bytes of padding, bringing the total header size to 16 bytes. To account for this difference, we used `sizeof(common_header_t)` throughout the code, so our allocator could work across both 32-bit and 64-bit systems.
 -   We converted the start of the block from `void *` to `common_header_t *`, so its first bytes could be used as a header.
 -   We set `size` to the whole block minus the header, because `size` only counts for the bytes available for data.
 -   We set `next` to `NULL`, because at the start there is only one free block.
@@ -77,7 +76,7 @@ int free_list_is_empty(void)
 
 ## smalloc()
 
-This function is used to find a free block that has enough memory for caller. It then splits that block, and returns a pointer to the memory the program can use.
+This function is used to find a free block that has enough memory for the caller. It then splits that block, and returns a pointer to the memory the program can use.
 
 ```c
 void *smalloc(int byte_count)
@@ -139,7 +138,7 @@ common_header_t *find_first_listnode(int byte_count, common_header_t **previous_
 
 -   The freelist is walked from `list_head`, one node at a time. As soon as a node whose `size`  is big enough, that node's pointer value is returned. This is **first-fit**, as the first block that fits is chosen, even if a better sized block exists somewhere else on the list. If the end of the list is reached without finding a node, `current_head` is `NULL`, which is returned.
 - We also needed to keep track of the node before the chosen node because the free list is a singly linked list, meaning each node only contains a pointer to the next node. When we split a free block, we create a new header for the remaining free sub-block. We then need to update the previous node's `next` pointer so that it points to this new sub-block. Since we cannot move backwards through the list, we tracked the previous node as we searched through the free list.
--   A function can only return one value, so we gave back the previous node by passing by reference through`previous_head`, which is a pointer to a pointer. d the function writes the previous node into it.
+-   A function can only return one value, so we gave back the previous node by passing by reference through`previous_head`, which is a pointer to a pointer. The function also writes the previous node into it.
 -   If the chosen node is the first node of the list, `previous_head` stays `NULL`.
 
 ## split_node()
@@ -186,7 +185,7 @@ First, we calculated the size of the remaining free space. Since the remainder n
 **If the remainder is large enough, we split the block**:
 1. We calculated the address of the remaining free block using pointer arithmetic. We first cast the pointer to `char *` because pointer arithmetic moves by the size of the data type being pointed to. Adding 1 to a `common_header_t *` moves by the size of the struct, whereas adding 1 to a `char *` moves by just 1 byte. This allows us to find the exact address of where the remaining free block starts.
 2. We set the remainder's `size` and its `next` pointer. Its `next` points to the node after the original block, so the new remainder takes its place in the free list.
-3. We then update the chosen block's header to represent the allocated block. We set its `size` to `byte_count`, so that `sfree()` knows how much memory to return later. We also set `next` to `NULL`, as allocated blocks are no part of the free list and.
+3. We then update the chosen block's header to represent the allocated block. We set its `size` to `byte_count`, so that `sfree()` knows how much memory to return later. We also set `next` to `NULL`, as allocated blocks are no part of the free list.
 
 **Important**  -If the remainder is less than 8 bytes (on a 32-bit system), we don't split the block. This is because 8 bytes is the minimum size needed to store a header, so there would not be enough space to create another free list node. Instead, we give the entire block to the caller, including the remaining unused bytes, and keep its original `size` so that `sfree()` can return the whole block to the free list.
 
@@ -269,7 +268,7 @@ void allocator_list_dump(void)
 ```
 -   The function goes through the freelist one node at a time and prints each node's `size`, followed by an arrow.
 -   We print`[NULL]` at the end to show where the list stops, followed by a newline.
--   For example, a freelist with three free blocks is prints as `[SIZE: 10] ----> [SIZE: 3] ----> [SIZE: 150] ----> [NULL]`.
+-   For example, a freelist with three free blocks is printed as `[SIZE: 10] ----> [SIZE: 3] ----> [SIZE: 150] ----> [NULL]`.
 
 ## allocator_free_mem_size()
 
@@ -304,3 +303,62 @@ size_t allocator_req_mem(size_t failed_allocation_size)
 
 -   Every allocated block needs a header as well as its data, so a request uses up more memory than the number of bytes asked for.
 -   The function adds the size of one header to the size of the request.
+
+
+# 3.1 - Adding a different fit type
+
+
+The aim of this task was to change the algorithm used to find an available block of memory. In Version 1, `find_first_listnode()` was used to select the first free block large enough to satisfy the request. In Version 2, `find_best_listnode()` selects the smallest free block from all available blocks that can accommodate the requested allocation.
+
+First-fit is faster because it stops searching as soon as a suitable block is found. However, it may allocate from a large block even when a smaller suitable block exists further along the free list. Best-fit preserves larger blocks for larger allocation requests by prioritising smaller blocks that are still large enough to satisfy the request.
+
+## Explanation of wastefulness of first fit
+
+To demonstrate and explain the wastefulness of `find_best_listnode()` a small test programme was created.
+
+In the diagrams below, allocated blocks are shown in red and free blocks are shown in green. The shaded part at the top of each block is its header.
+
+**1. Allocating the three blocks**
+
+```c
+// First fill the heap with a 500, 40 and 400 byte block
+void  *a  =  smalloc(500);
+void  *b  =  smalloc(40);
+void  *c  =  smalloc(400);
+```
+
+- We first allocate blocks of 500, 40 and 400 bytes. Each block is split from the single free block, so they are placed one after another in memory.
+- Only a small remaining block is left free at the end of the heap. This is the only node in the free list, so the pointer (`list_head`) points to it.`
+
+
+<u>![Heap after allocating 500, 40 and 400 bytes](images/one.png)</u>
+
+**2. Freeing the 40 and 400 byte blocks**
+```c
+//Then free the memory of b and c
+sfree(b);
+sfree(c);
+```
+- We then free the 40 byte block, followed by the 400 byte block. As `sfree()` adds every freed block to the head of the free list, the block that was freed last ends up first.
+- The first pointer (`list_head`) therefore points to the 400 byte block. Its `next` points backwards in memory to the 40 byte block, whose `next` points to the remaining block at the end of the heap.
+- This shows that the order of the free list does not match the order of the blocks in memory. It depends on the order the blocks were freed in.
+
+<u>![Arrows representing pointers to nodes](images/one.png)</u>
+
+**3. Where the 40 byte request should go**
+```c
+//Finally ask for 40 bytes, which should fit perfectly
+void  *d  =  smalloc(40);
+```
+- We then request 40 bytes. The recently freed 40 byte block fits this request exactly, so no memory would be wasted and the block would not need to be split.
+- This is the block that the best-fit function chooses, as it is the smallest block that is big enough. The 400 byte block is left whole.
+
+<u>![The 40 byte request fits the 40 byte block exactly](Images/three.png)</u>
+
+**4. Where first-fit actually puts it**
+
+- With first-fit, the search stops at the first node that is big enough, which is the 400 byte block of `list_head`. This means the 40 byte block is never checked.
+- This results in the 400 byte block is split into a 40 byte allocated block and a 352 byte remainder (400 bytes, minus the 40 bytes requested, minus the 8 byte header of the remainder).
+- **Important** - This means when we then request 400 bytes again, the request fails, as there is no contiguous block of memory with this size (Only 344, 40, or 20 bytes).
+
+<u>![First-fit splits the 400 byte block instead](Images/four.png)</u>
