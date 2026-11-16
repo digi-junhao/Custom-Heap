@@ -6,8 +6,6 @@
 #include <string.h>
 #include <sys/mman.h>
 
-//define constants
-#define MEM_SIZE (2 * 1024 * 1024)
 
 void *get_mem_block(void *addr, size_t mem_size);
 void *smalloc(int byte_count);
