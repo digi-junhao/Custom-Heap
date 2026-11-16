@@ -35,7 +35,7 @@ void *smalloc(int byte_count)
     }
 
     common_header_t *previous_head = NULL;
-    common_header_t *current_head = find_first_listnode(byte_count, &previous_head);
+    common_header_t *current_head = find_best_listnode(byte_count, &previous_head);
 
     if (current_head == NULL)
     {
@@ -56,10 +56,22 @@ void sfree(void *memptr)
     {
         return;
     }
-    common_header_t *meta_head =
-    (common_header_t *)((char *)memptr - sizeof(common_header_t));
-    // This will insert the block at the head of the freelist
-    insert_at_head(meta_head);
+
+    common_header_t* meta_head = (common_header_t*)((char*)memptr - sizeof(common_header_t));
+
+    // This will insert the block into the list in address order
+    common_header_t* previous = insert_in_order(meta_head);
+
+    // This will join the block with any adjacent free blocks
+    merge(meta_head, previous);
+}
+
+void merge(common_header_t *node, common_header_t *previous)
+{
+    // Joins the freed block with the free block after it, which is node-> next
+    merge_next(node);
+    // Joins the free block before it with the freed block, which is previous -> next which is node.
+    merge_next(previous);
 }
 
 void allocator_list_dump(void)
@@ -89,3 +101,4 @@ size_t allocator_req_mem(size_t failed_allocation_size)
 {
     return failed_allocation_size + sizeof(common_header_t);
 }
+

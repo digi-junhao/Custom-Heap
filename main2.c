@@ -44,5 +44,5 @@ int main(void)
     sfree(a);
     sfree(d);
     sfree(e);
-    return 0;
+    return;
 }

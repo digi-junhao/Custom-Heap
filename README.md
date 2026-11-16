@@ -154,7 +154,7 @@ common_header_t *split_node(common_header_t *current_head, int byte_count)
 
     //This is a feature added so that if the size of the freelist node is less than a certain value(8)
     //that malloc function call will occupy additional unneeded bytes.
-    if (remainder_size >= sizeof(current_head))
+    if (remainder_size >= (int)sizeof(current_head))
     {
         //Pointer arithmetic to calculate the pointer value for the new freelist node
         //Moves towards higher memory addresses within the allocated memory region.
@@ -353,7 +353,8 @@ void  *d  =  smalloc(40);
 - We then request 40 bytes. The recently freed 40 byte block fits this request exactly, so no memory would be wasted and the block would not need to be split.
 - This is the block that the best-fit function chooses, as it is the smallest block that is big enough. The 400 byte block is left whole.
 
-<u>![The 40 byte request fits the 40 byte block exactly](Images/three.png)</u>
+<u>![The 40 byte request fits the 40 byte block exactly](Images/three.png)</u> ![First Fit results](Images/ff.png)
+
 
 **4. Where first-fit actually puts it**
 
@@ -361,4 +362,45 @@ void  *d  =  smalloc(40);
 - This results in the 400 byte block is split into a 40 byte allocated block and a 352 byte remainder (400 bytes, minus the 40 bytes requested, minus the 8 byte header of the remainder).
 - **Important** - This means when we then request 400 bytes again, the request fails, as there is no contiguous block of memory with this size (Only 344, 40, or 20 bytes).
 
-<u>![First-fit splits the 400 byte block instead](Images/four.png)</u>
+<u>![First-fit splits the 400 byte block instead](Images/four.png)</u>![Best Fit results](Images/bf.png)
+
+## find_best_listnode()
+
+This function is used to go through the whole freelist and return the smallest node that is big enough for the request. It returns `NULL` if no node is big enough.
+
+```c
+// function for finding best node to create memory
+common_header_t *find_best_listnode(int byte_count, common_header_t **previous_head)
+{
+    common_header_t *temp = list_head;
+    common_header_t *temp_previous = NULL; // node before temp during the walk
+    common_header_t *final = NULL;         // smallest node found that fits
+
+    *previous_head = NULL;
+
+    // go through the whole list, as a smaller fitting node could be anywhere
+    while (temp != NULL)
+    {
+        // only consider nodes big enough for the request
+        if (byte_count <= temp->size)
+        {
+            // first fitting node, or smaller than the best so far
+            if (final == NULL || temp->size < final->size)
+            {
+                final = temp;
+                *previous_head = temp_previous; // save the node before the best one
+            }
+        }
+
+        temp_previous = temp;
+        temp = temp->next;
+    }
+
+    return final; // NULL if no node fits
+}
+
+```
+- The free list is walked from `list_head` using two temporary pointers. `temp` is the node currently being checked and `temp_previous` is the node before it.
+- The actual pointers, `final` and `*previous_head`, hold pointers for the best node found so far and the node before it. These are the values given back to `smalloc`, and they only change when a better node is found.
+- For every node, we first check that it is big enough for the request. We then check that it is better than the best node found so far, which is true if no node has been found yet (`final` is `NULL`) or if its `size` is smaller than the current best. If both checks pass, the temporary pointers are copied into the actual pointers. 
+- If no node is big enough, `final` is never changed from `NULL`, which is returned so that `smalloc` knows the request cannot be satisfied. 

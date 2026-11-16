@@ -15,4 +15,6 @@ void allocator_list_dump(void);
 size_t allocator_free_mem_size(void);
 size_t allocator_req_mem(size_t failed_allocation_size);
 
+void merge(common_header_t *node, common_header_t *previous);
+
 #endif

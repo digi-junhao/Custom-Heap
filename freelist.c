@@ -44,7 +44,7 @@ common_header_t *split_node(common_header_t *current_head, int byte_count)
 
     // This is a feature added so that if the size of the freelist node is less than a certain value(8)
     // that malloc function call will occupy additional unneeded bytes.
-    if (remainder_size >= sizeof(current_head))
+    if (remainder_size >= (int)sizeof(current_head))
     {
         // Pointer arithmetic to calculate the pointer value for the new freelist node
         // Moves towards higher memory addresses within the allocated memory region.
@@ -95,7 +95,6 @@ void insert_at_head(common_header_t *node)
 // function for finding best node to create memory
 common_header_t *find_best_listnode(int byte_count, common_header_t **previous_head)
 {
-
     //The temporary pointers so we can interrate through list
     //Temporary pointers become actual pointers if the coniditons are satisfied
     common_header_t *temp = list_head;
@@ -121,8 +120,53 @@ common_header_t *find_best_listnode(int byte_count, common_header_t **previous_h
     return final; // NULL if no node fits
 }
 
-//function for merging adjacent free memory spaces
+// function for inserting a freed block so the list stays sorted by address.
+// function will also return the previous node
+common_header_t *insert_in_order(common_header_t *node)
+{
+    //temporary pointers to nodes that will change as we itterate through the list
+    common_header_t *temp = list_head;
+    common_header_t *temp_previous = NULL;
 
-//merge 
+    //When this while loop terminates the value of temp will be the first node with a higher address than the freed block
+    while (temp != NULL && temp < node)
+    {
+        temp_previous = temp;
+        temp = temp->next;
+    }
+
+    //The freed block is linked in between temp_previous and temp
+    node->next = temp;
+
+    if (temp_previous == NULL)
+    {
+        list_head = node;
+    }
+    else
+    {
+        temp_previous->next = node;
+    }
+
+    return temp_previous;
+}
+
+// function for joining two adjacent nodes
+void merge_next(common_header_t *node)
+{
+    if (node == NULL || node->next == NULL)
+    {
+        return;
+    }
+
+    //Pointer arithmetic to calculate the address just after the end of the node
+    common_header_t *test_node_bottom = (common_header_t *)((char *)node + sizeof(common_header_t) + node->size);
+
+    //We then test if they are equal
+    if (test_node_bottom == node->next)
+    {
+        node->size += node->next->size + (int)sizeof(common_header_t);
+        node->next = node->next->next;
+    }
+}
 
 
