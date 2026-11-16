@@ -331,7 +331,7 @@ void  *c  =  smalloc(400);
 - Only a small remaining block is left free at the end of the heap. This is the only node in the free list, so the pointer (`list_head`) points to it.`
 
 
-<u>![Heap after allocating 500, 40 and 400 bytes](images/one.png)</u>
+<u>![Heap after allocating 500, 40 and 400 bytes](Images/one.png)</u>
 
 **2. Freeing the 40 and 400 byte blocks**
 ```c
@@ -343,7 +343,7 @@ sfree(c);
 - The first pointer (`list_head`) therefore points to the 400 byte block. Its `next` points backwards in memory to the 40 byte block, whose `next` points to the remaining block at the end of the heap.
 - This shows that the order of the free list does not match the order of the blocks in memory. It depends on the order the blocks were freed in.
 
-<u>![Arrows representing pointers to nodes](images/one.png)</u>
+<u>![Arrows representing pointers to nodes](Images/one.png)</u>
 
 **3. Where the 40 byte request should go**
 ```c
