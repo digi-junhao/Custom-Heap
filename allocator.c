@@ -37,6 +37,7 @@ void *smalloc(int byte_count)
     common_header_t *previous_head = NULL;
     common_header_t *current_head = find_best_listnode(byte_count, &previous_head);
 
+    //statement is true if no suitable node has been found
     if (current_head == NULL)
     {
         return NULL;
@@ -47,6 +48,7 @@ void *smalloc(int byte_count)
     link_previous_node(previous_head, replacement);
 
     // This gives address to the first memory location via pointer arithmetic
+    // If you didnt convert curret_head pointer to type char it would move 16x16 memory
     return (char *)current_head + sizeof(common_header_t);
 }
 
@@ -64,14 +66,6 @@ void sfree(void *memptr)
 
     // This will join the block with any adjacent free blocks
     merge(meta_head, previous);
-}
-
-void merge(common_header_t *node, common_header_t *previous)
-{
-    // Joins the freed block with the free block after it, which is node-> next
-    merge_next(node);
-    // Joins the free block before it with the freed block, which is previous -> next which is node.
-    merge_next(previous);
 }
 
 void allocator_list_dump(void)

@@ -25,9 +25,10 @@ common_header_t *split_node(common_header_t *current_head, int byte_count);
 void link_previous_node(common_header_t *previous_head, common_header_t *replacement);
 void insert_at_head(common_header_t *node);
 
-//task2
+//task3
 common_header_t *find_best_listnode(int byte_count, common_header_t **previous_head);
 common_header_t *insert_in_order(common_header_t *node);
+void merge(common_header_t *node, common_header_t *previous);
 void merge_next(common_header_t *node);
 
 #endif

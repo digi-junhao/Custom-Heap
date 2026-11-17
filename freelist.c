@@ -35,10 +35,13 @@ common_header_t *find_first_listnode(int byte_count, common_header_t **previous_
     return current_head;
 }
 
+//creates remainder node if possible and updates free-block into metadata header
 common_header_t *split_node(common_header_t *current_head, int byte_count)
 {
     // This calculates contiguous bytes of data of the new freelist node
+    // We need to turn value returned by sizeof() to type int because sizeof() returns size_t
     int remainder_size = current_head->size - byte_count - (int)sizeof(common_header_t);
+
     // This so we can link the new freelist node witht the next freelist node
     common_header_t *replacement = current_head->next;
 
@@ -84,6 +87,7 @@ void link_previous_node(common_header_t *previous_head, common_header_t *replace
     }
 }
 
+//This is a poor design choice as it leads to unordered pointers
 void insert_at_head(common_header_t *node)
 {
     // The freed block points to the first freelist element
@@ -135,9 +139,10 @@ common_header_t *insert_in_order(common_header_t *node)
         temp = temp->next;
     }
 
-    //The freed block is linked in between temp_previous and temp
+    //Link node to next node
     node->next = temp;
 
+    //Link node to previous node
     if (temp_previous == NULL)
     {
         list_head = node;
@@ -148,6 +153,14 @@ common_header_t *insert_in_order(common_header_t *node)
     }
 
     return temp_previous;
+}
+
+void merge(common_header_t *node, common_header_t *previous)
+{
+    // Joins the freed block with the free block after it, which is node-> next
+    merge_next(node);
+    // Joins the free block before it with the freed block, which is previous -> next which is node.
+    merge_next(previous);
 }
 
 // function for joining two adjacent nodes

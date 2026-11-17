@@ -187,7 +187,7 @@ First, we calculated the size of the remaining free space. Since the remainder n
 2. We set the remainder's `size` and its `next` pointer. Its `next` points to the node after the original block, so the new remainder takes its place in the free list.
 3. We then update the chosen block's header to represent the allocated block. We set its `size` to `byte_count`, so that `sfree()` knows how much memory to return later. We also set `next` to `NULL`, as allocated blocks are no part of the free list.
 
-**Important**  -If the remainder is less than 8 bytes (on a 32-bit system), we don't split the block. This is because 8 bytes is the minimum size needed to store a header, so there would not be enough space to create another free list node. Instead, we give the entire block to the caller, including the remaining unused bytes, and keep its original `size` so that `sfree()` can return the whole block to the free list.
+**Important**  -If the remainder is less than 16 bytes (on a 64-bit system), we don't split the block. This is because 16 bytes is the minimum size needed to store a header, so there would not be enough space to create another free list node. Instead, we give the entire block to the caller, including the remaining unused bytes, and keep its original `size` so that `sfree()` can return the whole block to the free list.
 
 ## link_previous_node()
 
@@ -305,18 +305,18 @@ size_t allocator_req_mem(size_t failed_allocation_size)
 -   The function adds the size of one header to the size of the request.
 
 
-# 3.1 - Adding a different fit type
+# 3.1 - Adding a different fit algorithm
 
 
-The aim of this task was to change the algorithm used to find an available block of memory. In Version 1, `find_first_listnode()` was used to select the first free block large enough to satisfy the request. In Version 2, `find_best_listnode()` selects the smallest free block from all available blocks that can accommodate the requested allocation.
+The task was to change the algorithm used to find an available block of memory. In Version 1, `find_first_listnode()` was used to select the first free block large enough to satisfy the request. In Version 2, `find_best_listnode()` selects the smallest free block from all available blocks that can accommodate the requested allocation.
 
 First-fit is faster because it stops searching as soon as a suitable block is found. However, it may allocate from a large block even when a smaller suitable block exists further along the free list. Best-fit preserves larger blocks for larger allocation requests by prioritising smaller blocks that are still large enough to satisfy the request.
 
-## Explanation of wastefulness of first fit
+## Demonstrating the wastefulness of first fit
 
 To demonstrate and explain the wastefulness of `find_best_listnode()` a small test programme was created.
 
-In the diagrams below, allocated blocks are shown in red and free blocks are shown in green. The shaded part at the top of each block is its header.
+In the diagrams below, allocated blocks are shown in red and free blocks are shown in green. The shaded part at the top of each block is its header. The total memory size is **1024 bytes.**
 
 **1. Allocating the three blocks**
 
@@ -359,7 +359,7 @@ void  *d  =  smalloc(40);
 **4. Where first-fit actually puts it**
 
 - With first-fit, the search stops at the first node that is big enough, which is the 400 byte block of `list_head`. This means the 40 byte block is never checked.
-- This results in the 400 byte block is split into a 40 byte allocated block and a 352 byte remainder (400 bytes, minus the 40 bytes requested, minus the 8 byte header of the remainder).
+- This results in the 400 byte block is split into a 40 byte allocated block and a 344 byte remainder (400 bytes, minus the 40 bytes requested, minus the 16 byte header of the remainder).
 - **Important** - This means when we then request 400 bytes again, the request fails, as there is no contiguous block of memory with this size (Only 344, 40, or 20 bytes).
 
 <u>![First-fit splits the 400 byte block instead](Images/four.png)</u>![Best Fit results](Images/bf.png)
@@ -404,3 +404,180 @@ common_header_t *find_best_listnode(int byte_count, common_header_t **previous_h
 - The actual pointers, `final` and `*previous_head`, hold pointers for the best node found so far and the node before it. These are the values given back to `smalloc`, and they only change when a better node is found.
 - For every node, we first check that it is big enough for the request. We then check that it is better than the best node found so far, which is true if no node has been found yet (`final` is `NULL`) or if its `size` is smaller than the current best. If both checks pass, the temporary pointers are copied into the actual pointers. 
 - If no node is big enough, `final` is never changed from `NULL`, which is returned so that `smalloc` knows the request cannot be satisfied. 
+
+# 3.2 - Merging adjacent free blocks
+
+
+The aim of this task was to change how freed blocks are returned to the free list. In Version 1, `insert_at_head()` was used to add the freed block to the start of the list, and free blocks were never joined back together. In this task we created two fundamental functions  `insert_in_order()` which keeps the free list sorted by memory address, and `merge()` which joins the freed block with other free blocks adjacent in memory.
+
+Without merging when we deallocate memory lots of pieces of memory, the heap will be split into smaller and smaller blocks. This means a request to a large amount of memory from the heap could fail even if there is enough free memory in total, because the free memory is not in one contiguous block. Merging reduces this fragmentation by turning adjacent free blocks back into one larger block.
+
+## Demonstrating the wastefullness caused by not merging or sorting list nodes
+
+
+To demonstrate and explain the fragmentation caused by `insert_at_head()` we created a small test programme like before.
+
+In the diagrams below, allocated blocks are shown in red and free blocks are shown in green. The shaded part at the top of each block is its header. The total memory size is **1024 bytes.**
+
+**1. Allocating the blocks**
+
+```c
+// First fill the heap with three 200 byte blocks and a 300 byte block
+void  *a  =  smalloc(200);
+void  *b  =  smalloc(200);
+void  *c  =  smalloc(200);
+void  *d  =  smalloc(300);
+```
+
+- We first allocate three blocks of 200 bytes, followed by a block of 300 bytes. Each block is split from the single free block created at initialisation, so they are placed one after another in memory.
+- Only a small remaining block of 44 bytes is left free at the end of the heap. This is the only node in the free list, so the pointer (`list_head`) points to it.
+
+<u>![Heap after allocating 200, 200, 200 and 300 bytes](Images/five.png)</u>
+
+
+**2. Freeing the first and third blocks**
+```c
+//Then free the memory of a and c, which are not next to each other
+sfree(a);
+sfree(c);
+```
+- We then free block `a` and then block `c`. As `insert_at_head()` adds every freed block to the start of the free list, the block that was freed last ends up first. The first pointer (`list_head`) therefore points to block `c`, whose `next` points backwards in memory to block `a`.
+- This shows that the order of the free list does not match the order of the blocks in memory in address order. It depends on the order the blocks were freed in.
+
+<u>![Arrows representing pointers to nodes in the order they were freed](Images/six.png)</u>
+ 
+**3. Freeing the block in between and requesting a large block**
+
+```c
+//We then free the memory of b which is in between a and c
+sfree(b);
+
+//Finally we ask for 500 bytes, which is bigger than any of the blocks that were freed
+void  *e  =  smalloc(500);
+```
+- We then free block `b`, which is added to the start of the free list. The free list is now `b`, then `c`, then `a`, even though in memory the order is `a`, `b`, then `c`.
+- Blocks `a`, `b` and `c` are now all free and directly next to each other in memory, but they stay as three separate 200 byte blocks, as they are never joined back together.
+- This results in a total of 644 bytes of free memory, but the largest block is only 200 bytes.
+- **Important** - This means when we then request 500 bytes, the request fails, as there is no contiguous block of memory with this size (Only 200, 200, 200, or 44 bytes).
+
+
+<u>![Without merging the 500 byte request fails](Images/seven.png)</u>![Version 1 results](Images/merge1.png)
+ 
+**4. What should happen**
+ 
+- With `insert_in_order()`, freeing `a` and then `c` gives the free list `a`, then `c`, as `a` has the lower address. The order of the free list now matches the order of the blocks in memory.
+- When `b` is freed, it is inserted in between `a` and `c`, which are both directly next to it in memory. `merge()` first joins `b` with the block after it, which is `c`. It then joins the block before it, which is `a`, with `b`. This leaves a single block of 632 bytes (200 bytes for each of the three blocks, plus the two 16 byte headers that are no longer needed).
+- The 500 byte request now succeeds, as it is given part of the 632 byte block.
+<u>![The three free blocks are merged into one](Images/merge_five.png)</u>![Version 2 results](Images/merge2.png)
+ 
+## insert_in_order()
+ 
+This function is used to insert a freed block into the free list so that the list stays sorted by address. It returns the node before the freed block, or `NULL` if the freed block is the first node.
+ 
+```c
+// function for inserting a freed block so the list stays sorted by address.
+// function will also return the previous node
+common_header_t *insert_in_order(common_header_t *node)
+{
+    //temporary pointers to nodes that will change as we itterate through the list
+    common_header_t *temp = list_head;
+    common_header_t *temp_previous = NULL;
+ 
+    //When this while loop terminates the value of temp will be the first node with a higher address than the freed block
+    while (temp != NULL && temp < node)
+    {
+        temp_previous = temp;
+        temp = temp->next;
+    }
+ 
+    //Link node to next node
+    node->next = temp;
+ 
+    //Link node to previous node
+    if (temp_previous == NULL)
+    {
+        list_head = node;
+    }
+    else
+    {
+        temp_previous->next = node;
+    }
+ 
+    return temp_previous;
+}
+ 
+```
+- The free list is walked from `list_head` using two temporary pointers. `temp` is the node currently being checked and `temp_previous` is the node before it.
+- The loop compares the addresses of the nodes, and stops at the first node with a higher address than the freed block. If the end of the list is reached, `temp` is `NULL`, which means the freed block has the highest address and becomes the last node.
+- The freed block is then linked in between `temp_previous` and `temp`. If `temp_previous` is `NULL`, the freed block has the lowest address, so `list_head` is changed to point to it.
+- The previous node is returned so that `merge()` can check if it is next to the freed block, without having to search the free list again.
+## merge_next()
+ 
+This function is used to join a node with the node after it in the free list, if the two are directly next to each other in memory.
+ 
+```c
+// function for joining two adjacent nodes
+void merge_next(common_header_t *node)
+{
+    if (node == NULL || node->next == NULL)
+    {
+        return;
+    }
+ 
+    //Pointer arithmetic to calculate the address just after the end of the node
+    common_header_t *test_node_bottom = (common_header_t *)((char *)node + sizeof(common_header_t) + node->size);
+ 
+    //We then test if they are equal
+    if (test_node_bottom == node->next)
+    {
+        node->size += node->next->size + (int)sizeof(common_header_t);
+        node->next = node->next->next;
+    }
+}
+ 
+```
+- If the node is `NULL`, or there is no node after it, there is nothing to join, so the function simply returns.
+- We calculated the address just after the end of the node using pointer arithmetic. As in `split_node()`, we first cast the pointer to `char *` so that the pointer arithmetic moves in bytes.
+- If this address is equal to the address of the next node, the two blocks are directly next to each other in memory, with no allocated block in between.
+- The node then takes over the next node. We add the next node's `size` and the size of its header to the node's `size`, as the header is no longer needed and becomes part of the data. We then set `next` to the node after the next node, which removes the next node from the free list.
+## merge()
+ 
+This function is used to join a freed block with the free blocks on either side of it.
+ 
+```c
+void merge(common_header_t *node, common_header_t *previous)
+{
+    // Joins the freed block with the free block after it, which is node-> next
+    merge_next(node);
+    // Joins the free block before it with the freed block, which is previous -> next which is node.
+    merge_next(previous);
+}
+ 
+```
+- As the free list is sorted by address, the only blocks that can be next to the freed block in memory are the nodes directly before and after it in the free list. This means only two checks are needed, and the whole free list does not have to be searched.
+- We first use `merge_next()` on the freed block, which joins it with the block after it. We then use `merge_next()` on the previous node, which joins it with the freed block.
+- The order of these two lines is important. If the previous node was merged first, the freed block would no longer be a node in the free list, so it could not be joined with the block after it.
+## Changes to sfree()
+ 
+The only change to `sfree()` was replacing the call to `insert_at_head()` with `insert_in_order()` and `merge()`.
+ 
+```c
+void sfree(void *memptr)
+{
+    if (memptr == NULL)
+    {
+        return;
+    }
+ 
+    common_header_t* meta_head = (common_header_t*)((char*)memptr - sizeof(common_header_t));
+ 
+    // This will insert the block into the list in address order
+    common_header_t* previous = insert_in_order(meta_head);
+ 
+    // This will join the block with any adjacent free blocks
+    merge(meta_head, previous);
+}
+ 
+```
+- The freed block is first inserted into the free list in address order, which also gives back the node before it.
+- `merge()` is then called with the freed block and the previous node, so that any adjacent free blocks are joined together straight away.
