@@ -186,27 +186,19 @@ void merge_next(common_header_t *node)
 // function for calculating the number of free blocks, total free memory and largest free block
 void freelist_stats(size_t *N, size_t *F, size_t *L)
 {
-    //Values start at 0 and are added to as we iterate through the list
     *N = 0;
     *F = 0;
     *L = 0;
-
     common_header_t *temp = list_head;
 
     while (temp != NULL)
     {
-        //Counts the number of free blocks
         *N += 1;
-
-        //Adds the size of the free block to the total free memory
         *F += temp->size;
-
-        //Updates the largest free block if this block is bigger
         if ((size_t)temp->size > *L)
         {
             *L = temp->size;
         }
-
         temp = temp->next;
     }
 }

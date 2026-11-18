@@ -67,6 +67,7 @@ void sfree(void *memptr)
     // This will join the block with any adjacent free blocks
     merge(meta_head, previous);
 }
+    
 
 void allocator_list_dump(void)
 {
