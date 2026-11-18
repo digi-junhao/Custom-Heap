@@ -469,6 +469,31 @@ void  *e  =  smalloc(500);
 - When `b` is freed, it is inserted in between `a` and `c`, which are both directly next to it in memory. `merge()` first joins `b` with the block after it, which is `c`. It then joins the block before it, which is `a`, with `b`. This leaves a single block of 632 bytes (200 bytes for each of the three blocks, plus the two 16 byte headers that are no longer needed).
 - The 500 byte request now succeeds, as it is given part of the 632 byte block.
 <u>![The three free blocks are merged into one](Images/merge_five.png)</u>![Version 2 results](Images/merge2.png)
+
+## Changes to sfree()
+ 
+The only change to `sfree()` was replacing the call to `insert_at_head()` with `insert_in_order()` and `merge()`.
+ 
+```c
+void sfree(void *memptr)
+{
+    if (memptr == NULL)
+    {
+        return;
+    }
+ 
+    common_header_t* meta_head = (common_header_t*)((char*)memptr - sizeof(common_header_t));
+ 
+    // This will insert the block into the list in address order
+    common_header_t* previous = insert_in_order(meta_head);
+ 
+    // This will join the block with any adjacent free blocks
+    merge(meta_head, previous);
+}
+ 
+```
+- The freed block is first inserted into the free list in address order. The node before it is also returned by the function
+- `merge()` is then called with the arguements of the freed block and the previous node, so that any adjacent free blocks are joined together straight away.
  
 ## insert_in_order()
  
@@ -507,13 +532,33 @@ common_header_t *insert_in_order(common_header_t *node)
 }
  
 ```
-- The free list is walked from `list_head` using two temporary pointers. `temp` is the node currently being checked and `temp_previous` is the node before it.
-- The loop compares the addresses of the nodes, and stops at the first node with a higher address than the freed block. If the end of the list is reached, `temp` is `NULL`, which means the freed block has the highest address and becomes the last node.
-- The freed block is then linked in between `temp_previous` and `temp`. If `temp_previous` is `NULL`, the freed block has the lowest address, so `list_head` is changed to point to it.
-- The previous node is returned so that `merge()` can check if it is next to the freed block, without having to search the free list again.
-## merge_next()
+The free list is walked from the `list_head` using the pointer `temp`, which points to the current node being examined, and `temp_previous`, which points to the node immediately before it.
+
+- The `while` loop compares the address of the block being freed with the address of the current node. The loop stops when `temp` points to the first node with a higher memory address than the freed block. If the end of the list is reached, `temp` becomes `NULL`, meaning the freed block has the highest address and should be inserted at the end of the list.
+- The freed block is then inserted between `temp_previous` and `temp`, so the list remains in ascending order of memory addresses. If `temp_previous` is `NULL`, the freed block has the lowest address, so `list_head` is updated to point to it.
+- The function returns `temp_previous`, allowing the `merge()` function to check if the preceding free block is adjacent to the newly freed block without having to traverse the list again.
+
+## merge()
  
-This function is used to join a node with the node after it in the free list, if the two are directly next to each other in memory.
+This function is used to join a freed block with the free blocks on either side of it.
+ 
+```c
+void merge(common_header_t *node, common_header_t *previous)
+{
+    // Joins the freed block with the free block after it, which is node-> next
+    merge_next(node);
+    // Joins the free block before it with the freed block, which is previous -> next which is node.
+    merge_next(previous);
+}
+ 
+```
+- As the free list is sorted by address, the only blocks that can be next to the freed block in memory are the nodes directly before and after it in the free list. This means only two checks are needed, and the whole free list does not have to be searched.
+- We first use `merge_next()` on the freed block, which joins it with the block after it. We then use `merge_next()` on the previous node, which joins it with the freed block.
+- **Important** - The order of the function calls is importnat. If the previous node was merged first, the freed block would no longer be a node in the free list, so it could not be joined with the block after it.
+
+## `merge_next()`
+
+This function merges a free-list node and the node after it, if the two blocks are physically next to each other in memory. This combines them into a single, larger free block capable of storing a larger block of memory.
  
 ```c
 // function for joining two adjacent nodes
@@ -537,47 +582,7 @@ void merge_next(common_header_t *node)
  
 ```
 - If the node is `NULL`, or there is no node after it, there is nothing to join, so the function simply returns.
-- We calculated the address just after the end of the node using pointer arithmetic. As in `split_node()`, we first cast the pointer to `char *` so that the pointer arithmetic moves in bytes.
+- We calculated the address just after the end of the node using pointer arithmetic. As in `split_node()`, we first cast the pointer to `char *` so that the pointer arithmetic moves in single bytes.
 - If this address is equal to the address of the next node, the two blocks are directly next to each other in memory, with no allocated block in between.
 - The node then takes over the next node. We add the next node's `size` and the size of its header to the node's `size`, as the header is no longer needed and becomes part of the data. We then set `next` to the node after the next node, which removes the next node from the free list.
-## merge()
- 
-This function is used to join a freed block with the free blocks on either side of it.
- 
-```c
-void merge(common_header_t *node, common_header_t *previous)
-{
-    // Joins the freed block with the free block after it, which is node-> next
-    merge_next(node);
-    // Joins the free block before it with the freed block, which is previous -> next which is node.
-    merge_next(previous);
-}
- 
-```
-- As the free list is sorted by address, the only blocks that can be next to the freed block in memory are the nodes directly before and after it in the free list. This means only two checks are needed, and the whole free list does not have to be searched.
-- We first use `merge_next()` on the freed block, which joins it with the block after it. We then use `merge_next()` on the previous node, which joins it with the freed block.
-- The order of these two lines is important. If the previous node was merged first, the freed block would no longer be a node in the free list, so it could not be joined with the block after it.
-## Changes to sfree()
- 
-The only change to `sfree()` was replacing the call to `insert_at_head()` with `insert_in_order()` and `merge()`.
- 
-```c
-void sfree(void *memptr)
-{
-    if (memptr == NULL)
-    {
-        return;
-    }
- 
-    common_header_t* meta_head = (common_header_t*)((char*)memptr - sizeof(common_header_t));
- 
-    // This will insert the block into the list in address order
-    common_header_t* previous = insert_in_order(meta_head);
- 
-    // This will join the block with any adjacent free blocks
-    merge(meta_head, previous);
-}
- 
-```
-- The freed block is first inserted into the free list in address order, which also gives back the node before it.
-- `merge()` is then called with the freed block and the previous node, so that any adjacent free blocks are joined together straight away.
+

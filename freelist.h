@@ -4,11 +4,6 @@
 //include libraries
 #include <stddef.h>
 
-//define constants
-#define MEM_SIZE 1024
-//(2 * 1024 * 1024)
-
-
 //structure for both freelist nodes and metadata headers
 typedef struct __common_header_t
 {
@@ -30,5 +25,8 @@ common_header_t *find_best_listnode(int byte_count, common_header_t **previous_h
 common_header_t *insert_in_order(common_header_t *node);
 void merge(common_header_t *node, common_header_t *previous);
 void merge_next(common_header_t *node);
+
+//task4
+void freelist_stats(size_t *N, size_t *F, size_t *L);
 
 #endif

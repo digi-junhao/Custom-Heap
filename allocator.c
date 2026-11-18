@@ -96,3 +96,10 @@ size_t allocator_req_mem(size_t failed_allocation_size)
     return failed_allocation_size + sizeof(common_header_t);
 }
 
+// allocator.c
+// function used by the stress test to find the number of free blocks (N),
+// the total free memory (F) and the largest free block (L)
+void allocator_stats(size_t *N, size_t *F, size_t *L)
+{
+    freelist_stats(N, F, L);
+}
