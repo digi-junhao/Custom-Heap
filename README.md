@@ -1,4 +1,4 @@
-# Task 1/2 – Implement and Test Version 1
+# Version 1 – Implement Basic Malloc() and Free()
 
 The aim of this task was to build our own versions of `malloc` and `free`, called `smalloc` and `sfree`, to virtually dynamically allocate and deallocate memory on the heap.
 
@@ -305,7 +305,7 @@ size_t allocator_req_mem(size_t failed_allocation_size)
 -   The function adds the size of one header to the size of the request.
 
 
-# 3.1 - Adding a different fit algorithm
+# Version 2.1 - Adding a different fit algorithm
 
 
 The task was to change the algorithm used to find an available block of memory. In Version 1, `find_first_listnode()` was used to select the first free block large enough to satisfy the request. In Version 2, `find_best_listnode()` selects the smallest free block from all available blocks that can accommodate the requested allocation.
@@ -405,7 +405,7 @@ common_header_t *find_best_listnode(int byte_count, common_header_t **previous_h
 - For every node, we first check that it is big enough for the request. We then check that it is better than the best node found so far, which is true if no node has been found yet (`final` is `NULL`) or if its `size` is smaller than the current best. If both checks pass, the temporary pointers are copied into the actual pointers. 
 - If no node is big enough, `final` is never changed from `NULL`, which is returned so that `smalloc` knows the request cannot be satisfied. 
 
-# 3.2 - Merging adjacent free blocks
+# Version 2.1 - Merging adjacent free blocks
 
 
 The aim of this task was to change how freed blocks are returned to the free list. In Version 1, `insert_at_head()` was used to add the freed block to the start of the list, and free blocks were never joined back together. In this task we created two fundamental functions  `insert_in_order()` which keeps the free list sorted by memory address, and `merge()` which joins the freed block with other free blocks adjacent in memory.
@@ -586,7 +586,7 @@ void merge_next(common_header_t *node)
 - If this address is equal to the address of the next node, the two blocks are directly next to each other in memory, with no allocated block in between.
 - The node then takes over the next node. We add the next node's `size` and the size of its header to the node's `size`, as the header is no longer needed and becomes part of the data. We then set `next` to the node after the next node, which removes the next node from the free list.
 
-# 4 - Stress testing 
+# Stress Testing All Versions
 
 
 In this task we tested our allocator with a much bigger load than the small test programmes we used before. We used the `stress_test.c` programme given in the assignment and set `MEM_SIZE` to 10 MB.
