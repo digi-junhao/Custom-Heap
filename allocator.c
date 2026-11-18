@@ -2,15 +2,19 @@
 #include "freelist.h"
 
 // structure for storing information about each arena
+// stores the first address of the arena(this will NOT change), the size of the arena in bytes 
+// and the first node of the arena's freelist(this will change).
+
 typedef struct
 {
-    char *start;           // first address of the arena
-    size_t size;           // size of the arena in bytes
-    common_header_t *head; // first node of this arena's freelist
+    char *start;           
+    size_t size;          
+    common_header_t *head; 
 } arena_t;
 
 // index 0 is tiny, 1 is small and 2 is medium
 arena_t arenas[NUM_ARENAS];
+//0 if arenas are created 1 if they are not
 int arenas_created = 0;
 
 void *get_mem_block(void *addr, size_t mem_size)
@@ -39,14 +43,16 @@ int create_arenas(void)
 
     for (int i = 0; i < NUM_ARENAS; i++)
     {
+        //creates memory space for each arena with respective size
         void *temp = get_mem_block(NULL, arena_sizes[i]);
 
         if (temp == NULL)
         {
+            //returns 0 so function that called it knows it has failed
             return 0;
         }
 
-        // init_free_list sets list_head, so we save it as this arena's freelist
+        //initialises the memory space as a list_head
         init_free_list(temp, arena_sizes[i]);
 
         arenas[i].start = (char *)temp;
@@ -95,7 +101,7 @@ int find_arena(void *ptr)
 
 void *smalloc(int byte_count)
 {
-    // the arenas on the first call
+    // the arenas on the first memory allocation call
     if (!arenas_created)
     {
         if (!create_arenas())
@@ -121,6 +127,7 @@ void *smalloc(int byte_count)
     common_header_t *replacement = split_node(current_head, byte_count);
 
     link_previous_node(previous_head, replacement);
+    //updates list_head in case it has changed
     arenas[zone].head = list_head;
 
     // This gives address to the first memory location via pointer arithmetic
@@ -150,16 +157,18 @@ void sfree(void *memptr)
 
     // This will join the block with any adjacent free blocks
     merge(meta_head, previous);
+    //Updates list head in case it has changed
     arenas[zone].head = list_head;
 }
 
+//this function allows us to visualise the block of the free memory list
 void allocator_list_dump(void)
 {
     char *names[NUM_ARENAS] = {"TINY", "SMALL", "MEDIUM"};
     // prints the freelist of each arena on its own line
     for (int i = 0; i < NUM_ARENAS; i++)
     {
-        printf("%-6s: ", names[i]);
+        printf("%s: ", names[i]);
         common_header_t *temp = arenas[i].head;
         while (temp != NULL)
         {
@@ -176,6 +185,7 @@ size_t allocator_free_mem_size(void)
     allocator_stats(&N, &F, &L);
     return F;
 }
+
 size_t allocator_req_mem(size_t failed_allocation_size)
 {
     return failed_allocation_size + sizeof(common_header_t);

@@ -7,7 +7,8 @@
 
 //define constants
 //updated 10MB of memory
-#define MEM_SIZE (10 * 1024 * 1024)
+//not needed for task 5
+//#define MEM_SIZE (10 * 1024 * 1024)
 
 //constants needed for task 5
 #define NUM_ARENAS 3
