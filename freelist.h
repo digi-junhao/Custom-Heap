@@ -14,7 +14,7 @@ typedef struct __common_header_t
 extern common_header_t *list_head;
 
 void init_free_list(void *mem, size_t mem_size);
-int free_list_is_empty(void);
+int free_list_empty(void);
 common_header_t *find_first_listnode(int byte_count, common_header_t **previous_head);
 common_header_t *split_node(common_header_t *current_head, int byte_count);
 void link_previous_node(common_header_t *previous_head, common_header_t *replacement);

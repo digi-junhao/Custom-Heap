@@ -586,7 +586,7 @@ void merge_next(common_header_t *node)
 - If this address is equal to the address of the next node, the two blocks are directly next to each other in memory, with no allocated block in between.
 - The node then takes over the next node. We add the next node's `size` and the size of its header to the node's `size`, as the header is no longer needed and becomes part of the data. We then set `next` to the node after the next node, which removes the next node from the free list.
 
-# 4 - Stress testing Version 2
+# 4 - Stress testing 
 
 
 In this task we tested our allocator with a much bigger load than the small test programmes we used before. We used the `stress_test.c` programme given in the assignment and set `MEM_SIZE` to 10 MB.
@@ -600,6 +600,64 @@ We ran it on three versions of our allocator, changing `smalloc()` and `sfree()`
 - **4.3** Best-fit, with merging 
 
 After that we increased the load on Version 2 to see when it would start failing too.
+
+
+## Summary of results
+
+All three runs used `LIVE` = 512.
+
+| | 4.1 First-fit, no merge | 4.2 Best-fit, no merge | 4.3 Best-fit, merge |
+|---|---|---|---|
+| Successful requests | 21.33% | 78.68% | 100.00% |
+| Successful allocation (bytes) | 6.37% | 62.44% | 100.00% |
+| Requests before first failure | 866 | 2666 | No failure |
+| Free memory at first failure | 2.00 MB | 2.40 MB | No failure |
+| Request size at first failure | 29 KB | 31 KB | No failure |
+| Memory utilisation at first failure | 0.80 | 0.76 | No failure |
+| Bytes-to-failure turnover (BTF) | 1.30 x `MEM_SIZE` | 3.98 x `MEM_SIZE` | No failure |
+| Final / maximum free list length | 7458 / 7458 | 2704 / 2705 | 75 / 90 |
+| Final / maximum external fragmentation | 0.9996 / 0.9996 | 0.9960 / 0.9964 | 0.2931 / 0.4759 |
+
+## 4.1 - First-fit, no merging
+
+<u>![Stress test results for first-fit without merging](Images/4.1.png)</u>
+
+- This version did pretty badly. The first failure came after only 866 requests, and overall only 21.33% of requests worked.
+- When it failed there was still 2.00 MB of total memory in the heap, but it couldn't find space for a 29 KB request. The free memory had been split into 7458 small blocks, and the fragmentation was 0.9996, so the biggest free block was tiny compared to the total.
+- This is because freed blocks just go to the head of the list and never get joined back together, so the heap only gets divided when something is freed. First-fit also makes it worse because it cuts into the first big block it finds, even for small requests.
+- Only 6.37% of the bytes requested were allocated, which is a lot lower than the 21.33% of requests. This is because the requests that still worked were mostly the small ones that could fit into the leftover gaps, while nearly all the big ones failed.
+
+## 4.2 - Best-fit, no merging
+
+<u>![Stress test results for best-fit without merging](Images/4.2.png)</u>
+
+- Using best-fit worked a lot better. It lasted around three times as long before its first failure (2666 requests instead of 866), and its BTF was 3.98 compared to 1.30. Overall 78.68% of requests worked.
+- This is because best-fit picks the smallest block that fits, so the bigger blocks are kept for bigger requests instead of being cut up.
+- The free list was also shorter, at 2704 blocks instead of 7458. Since best-fit usually picks a block close to the size asked for, there's often little or nothing left over to split off.
+- It still failed with 2.40 MB free though, and the fragmentation was still about 0.996. So without merging, best-fit only slows the fragmentation down, it doesn't stop it.
+
+## 4.3 - Best-fit, with merging
+
+<u>![Stress test results for best-fit with merging](Images/4.3.png)</u>
+
+- With merging, all 50,000 requests worked. It got through 755.81 MB of requests with only a 10 MB heap, which is around 75 times the heap size, and never failed once.
+- The free list never went above 90 blocks, compared to thousands in the other two versions. This is because every time a block is freed next to another free block, they get joined back into one bigger block.
+- The fragmentation stayed under 0.5 the whole time and ended at 0.2931, meaning the smallest free contiguous memory was at least half the total memory available at that point. This means there was always a big enough free block for the large requests.
+
+
+## Finding the tipping point
+
+Since best-fit with merging didn't fail at all with `LIVE` = 512, we kept increasing `LIVE` to see where it would start failing. `LIVE` is how many blocks the stress test keeps allocated at once, so a higher `LIVE` means more of the heap is being used at the same time.
+
+<u>![Successful requests as LIVE increases for best-fit with merging](Images/4.graph.png)</u>
+
+- Up to `LIVE` = 580, every request worked in all three runs.
+- At `LIVE` = 590 one of the three runs had a failure, and from 600 onwards every run failed at some point. So we took the tipping point to be around 590 to 600.
+- After that the success rate drops pretty steadily, down to about 68% at `LIVE` = 800. The three runs are almost on top of each other on the graph, so the results were quite consistent.
+
+We think the tipping point makes sense when you look at the heap size. Requests are between 1 byte and 32 KB, so the average is about 16 KB, plus the 16 byte header. That means a 10 MB heap can hold roughly 10 MB / 16 KB ≈ 639 average-sized blocks at once. It starts failing a bit before that, probably because some requests are bigger than average and there's always some space wasted in gaps between blocks.
+
+**Important** - With merging, the allocator only started failing once the heap was almost full (the memory utilisation at the first failure was 0.95 or more). This means that fragmentation was not an issue.
 
 ## allocator_stats()
 
@@ -648,63 +706,3 @@ void freelist_stats(size_t *N, size_t *F, size_t *L)
 - For each node we add 1 to the count, add its `size` to the total, and if it's bigger than the largest block so far it becomes the new largest.
 - `size` doesn't include the header, so `F` and `L` only count space that can actually hold data.
 - The stress test uses these to work out the external fragmentation, `1 - L/F`. If all the free memory is one big block then `L = F` and the fragmentation is 0. If it's split into lots of small pieces, `L` is tiny compared to `F` and the fragmentation gets close to 1.
-
-## Summary of results
-
-All three runs used `LIVE` = 512.
-
-| | 4.1 First-fit, no merge | 4.2 Best-fit, no merge | 4.3 Best-fit, merge |
-|---|---|---|---|
-| Successful requests | 21.33% | 78.68% | 100.00% |
-| Successful allocation (bytes) | 6.37% | 62.44% | 100.00% |
-| Requests before first failure | 866 | 2666 | No failure |
-| Free memory at first failure | 2.00 MB | 2.40 MB | No failure |
-| Request size at first failure | 29 KB | 31 KB | No failure |
-| Memory utilisation at first failure | 0.80 | 0.76 | No failure |
-| Bytes-to-failure turnover (BTF) | 1.30 x `MEM_SIZE` | 3.98 x `MEM_SIZE` | No failure |
-| Final / maximum free list length | 7458 / 7458 | 2704 / 2705 | 75 / 90 |
-| Final / maximum external fragmentation | 0.9996 / 0.9996 | 0.9960 / 0.9964 | 0.2931 / 0.4759 |
-
-## 4.1 - First-fit, no merging
-
-<u>![Stress test results for first-fit without merging](Images/4.1.png)</u>
-
-- This version did pretty badly. The first failure came after only 866 requests, and overall only 21.33% of requests worked.
-- When it failed there was still 2.00 MB free, but it couldn't find space for a 29 KB request. The free memory had been split into 7458 small blocks, and the fragmentation was 0.9996, so the biggest free block was tiny compared to the total.
-- This is because freed blocks just go to the head of the list and never get joined back together, so the heap only ever gets chopped up more. First-fit also makes it worse because it cuts into the first big block it finds, even for small requests.
-- Only 6.37% of the bytes requested were allocated, which is a lot lower than the 21.33% of requests. We think this is because the requests that still worked were mostly the small ones that could fit into the leftover gaps, while nearly all the big ones failed.
-
-## 4.2 - Best-fit, no merging
-
-<u>![Stress test results for best-fit without merging](Images/4.2.png)</u>
-
-- Best-fit did a lot better. It lasted around three times as long before its first failure (2666 requests instead of 866), and its BTF was 3.98 compared to 1.30. Overall 78.68% of requests worked.
-- This is because best-fit picks the smallest block that fits, so the bigger blocks are kept for bigger requests instead of being cut up.
-- The free list was also shorter, at 2704 blocks instead of 7458. Since best-fit usually picks a block close to the size asked for, there's often little or nothing left over to split off.
-- It still failed with 2.40 MB free though, and the fragmentation was still about 0.996. So without merging, best-fit only slows the fragmentation down, it doesn't stop it.
-
-## 4.3 - Best-fit, with merging
-
-<u>![Stress test results for best-fit with merging](Images/4.3.png)</u>
-
-- With merging, all 50,000 requests worked. It got through 755.81 MB of requests with only a 10 MB heap, which is around 75 times the heap size, and never failed once.
-- The free list never went above 90 blocks, compared to thousands in the other two versions. This is because every time a block is freed next to another free block, they get joined back into one bigger block.
-- The fragmentation stayed under 0.5 the whole time and ended at 0.2931. So there was always a big enough free block for the large requests.
-
-**Important** - The stress test seeds its random numbers with the current time, so the numbers change a bit every time we run it. The overall pattern between the three versions stayed the same each time though.
-
-## Finding the tipping point
-
-Since best-fit with merging didn't fail at all with `LIVE` = 512, we kept increasing `LIVE` to see where it would start failing. `LIVE` is how many blocks the stress test keeps allocated at once, so a higher `LIVE` means more of the heap is being used at the same time.
-
-Running this by hand for every value would have taken ages, so we wrote a script, `run_tests.sh`, which runs the stress test for `LIVE` from 512 to 800 in steps of 10, three times each, and saves everything to a CSV file. We then plotted the results in Excel.
-
-<u>![Successful requests as LIVE increases for best-fit with merging](Images/4.graph.png)</u>
-
-- Up to `LIVE` = 580, every request worked in all three runs.
-- At `LIVE` = 590 one of the three runs had a failure, and from 600 onwards every run failed at some point. So we took the tipping point to be around 590 to 600.
-- After that the success rate drops pretty steadily, down to about 68% at `LIVE` = 800. The three runs are almost on top of each other on the graph, so the results were quite consistent.
-
-We think the tipping point makes sense when you look at the heap size. Requests are between 1 byte and 32 KB, so the average is about 16 KB, plus the 16 byte header. That means a 10 MB heap can hold roughly 10 MB / 16 KB ≈ 639 average-sized blocks at once. It starts failing a bit before that, probably because some requests are bigger than average and there's always some space wasted in gaps between blocks.
-
-**Important** - With merging, the allocator only started failing once the heap was almost full (the memory utilisation at the first failure was 0.95 or more). Without merging, it failed because of fragmentation while around 20 to 25% of the heap was still free.

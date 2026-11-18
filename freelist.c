@@ -10,7 +10,7 @@ void init_free_list(void *mem, size_t mem_size)
     list_head->next = NULL;
 }
 
-int free_list_is_empty(void)
+int free_list_empty(void)
 {
     return list_head == NULL;
 }
