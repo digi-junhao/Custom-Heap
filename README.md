@@ -405,7 +405,7 @@ common_header_t *find_best_listnode(int byte_count, common_header_t **previous_h
 - For every node, we first check that it is big enough for the request. We then check that it is better than the best node found so far, which is true if no node has been found yet (`final` is `NULL`) or if its `size` is smaller than the current best. If both checks pass, the temporary pointers are copied into the actual pointers. 
 - If no node is big enough, `final` is never changed from `NULL`, which is returned so that `smalloc` knows the request cannot be satisfied. 
 
-# Version 2.1 - Merging adjacent free blocks
+# Version 2.2 - Merging adjacent free blocks
 
 
 The aim of this task was to change how freed blocks are returned to the free list. In Version 1, `insert_at_head()` was used to add the freed block to the start of the list, and free blocks were never joined back together. In this task we created two fundamental functions  `insert_in_order()` which keeps the free list sorted by memory address, and `merge()` which joins the freed block with other free blocks adjacent in memory.
@@ -618,7 +618,7 @@ All three runs used `LIVE` = 512.
 | Final / maximum free list length | 7458 / 7458 | 2704 / 2705 | 75 / 90 |
 | Final / maximum external fragmentation | 0.9996 / 0.9996 | 0.9960 / 0.9964 | 0.2931 / 0.4759 |
 
-## 4.1 - First-fit, no merging
+## 1 - First-fit, no merging
 
 <u>![Stress test results for first-fit without merging](Images/4.1.png)</u>
 
@@ -627,7 +627,7 @@ All three runs used `LIVE` = 512.
 - This is because freed blocks just go to the head of the list and never get joined back together, so the heap only gets divided when something is freed. First-fit also makes it worse because it cuts into the first big block it finds, even for small requests.
 - Only 6.37% of the bytes requested were allocated, which is a lot lower than the 21.33% of requests. This is because the requests that still worked were mostly the small ones that could fit into the leftover gaps, while nearly all the big ones failed.
 
-## 4.2 - Best-fit, no merging
+## 2 - Best-fit, no merging
 
 <u>![Stress test results for best-fit without merging](Images/4.2.png)</u>
 
@@ -636,7 +636,7 @@ All three runs used `LIVE` = 512.
 - The free list was also shorter, at 2704 blocks instead of 7458. Since best-fit usually picks a block close to the size asked for, there's often little or nothing left over to split off.
 - It still failed with 2.40 MB free though, and the fragmentation was still about 0.996. So without merging, best-fit only slows the fragmentation down, it doesn't stop it.
 
-## 4.3 - Best-fit, with merging
+## 3 - Best-fit, with merging
 
 <u>![Stress test results for best-fit with merging](Images/4.3.png)</u>
 
@@ -706,3 +706,404 @@ void freelist_stats(size_t *N, size_t *F, size_t *L)
 - For each node we add 1 to the count, add its `size` to the total, and if it's bigger than the largest block so far it becomes the new largest.
 - `size` doesn't include the header, so `F` and `L` only count space that can actually hold data.
 - The stress test uses these to work out the external fragmentation, `1 - L/F`. If all the free memory is one big block then `L = F` and the fragmentation is 0. If it's split into lots of small pieces, `L` is tiny compared to `F` and the fragmentation gets close to 1.
+
+
+# Version 3 - Size-class arenas
+
+
+The aim of this task was to split our single heap into three separate regions of memory, called arenas. Previously, every allocation, no matter the size, was taken from the same 10 MB heap and tracked in the same free list. In this task we created three arenas, each obtained from its own `mmap()` call and each with its own free list. Every request is sent to one arena depending on its size, and we kept best-fit and merging from Version 2 inside each arena.
+
+| Arena | Request size (including the header) | Arena size |
+|---|---|---|
+| TINY | up to 256 bytes | 1 MB |
+| SMALL | 257 bytes to 8 KB | 3 MB |
+| MEDIUM | above 8 KB | 6 MB |
+
+
+The main problem with a single heap is that all allocations compete for the same area of memory. Small, frequent allocations end up scattered in between large ones, which can stop large free blocks from being merged back together, and every request has to search through one long free list containing blocks of every size. Arenas separate the memory into independent regions, so that small allocations cannot interfere with the management of larger ones.
+
+
+## Demonstrating the problems with a single heap
+
+To explain why arenas are useful, we will go through the problems that happen when every allocation shares one heap.
+
+In the diagrams below, allocated blocks are shown in red and free blocks are shown in green. The shaded part at the top of each block is its header. The total memory size is **10 MB.**
+
+
+
+**1. Small allocations stop large blocks from merging**
+
+```c
+//Allocate a large block followed by a tiny block
+while (pairs < MAX_PAIRS)
+{
+    large[pairs] = smalloc(20000);
+    if (large[pairs] == NULL)
+    {
+        break;
+    }
+    tiny[pairs] = smalloc(100);
+    pairs++;
+}
+
+//Free all the large blocks
+for (int i = 0; i < pairs; i++)
+{
+    sfree(large[i]);
+}
+
+//Ask for 40000 bytes, which is bigger than one of the freed large blocks
+void *big = smalloc(40000);
+```
+
+- To demonstrate this, I created a small test programme, `main_arenatest.c`. It keeps allocating a 20,000 byte block and then a 100 byte block, until there is no space left.
+- In a single heap, the blocks are placed one after another in memory, so every tiny block ends up directly in between two large blocks.
+- We then free every large block, but keep all of the tiny blocks allocated.
+- Even though the free list is sorted and merging is used, the freed large blocks cannot be joined together. This is because there is a tiny block still allocated in between each of them, so no two free blocks are directly next to each other in memory.
+- This leaves a total amount of 10MB available in the heap memory, but only 20000 bytes is contiguous - **This is external fragmentation,**
+
+
+<u>![block](Images/6.1.png)</u>![Single heap results](Images/6.results.png)
+
+**2. Inefficient Searching for a Free Block**
+
+- Also with one heap everytime you allocate memory you must search the same free list, no matter its size. Imagine the free list contains 10000 blocks of 32 bytes, and 20 blocks of 100 KB.
+- If we request 80 KB, `find_best_listnode()` has to go through all 100100 nodes to be sure it has found the smallest block that fits, even though most of the blocks are far too small for the request.
+- The more small and large blocks there are mixed together in the free list, the longer every request takes, as best-fit always has to check every node.
+
+
+<u>![Searching one long free list of mixed sizes](Images/6.2.png)</u>
+
+
+## The arena structure
+
+This structure is used to store the information about each arena. We created an array of three of them, one for each arena.
+
+```c
+// structure for storing information about each arena
+// stores the first address of the arena(this will NOT change), the size of the arena in bytes 
+// and the first node of the arena's freelist(this will change).
+typedef struct
+{
+    char *start;           
+    size_t size;          
+    common_header_t *head; 
+} arena_t;
+
+// index 0 is tiny, 1 is small and 2 is medium
+arena_t arenas[NUM_ARENAS];
+//0 if arenas are created 1 if they are not
+int arenas_created = 0;
+```
+
+- `start` stores the first address of the arena and `size` stores how big it is. These never change after the arena is created, and are used later to work out which arena a freed block belongs to.
+- `head` points to the first node of that arena's free list. This changes every time the start of the free list changes
+- `arenas_created` makes sure the arenas are only created once. Before, we checked if `list_head` was `NULL`, but this is also true when the heap is completely full, a bug fixed now which would have caused `mmap()` to be called again to create another heap.
+- All our free list functions work on `list_head`, so rather than rewriting them, we just point `list_head` at the right arena's free list before calling them, then save it back into the arena after. This meant we could reuse all our free list functions from before.
+
+<u>![The arenas array](Images/6.3.png)</u>
+
+## create_arenas()
+
+This function is used to create the three arenas the first time `smalloc()` is called. It returns 1 if all three were created, and 0 if `mmap()` failed.
+
+```c
+// function for creating the three arenas, each with its own freelist
+// returns 1 if all three were created and 0 if mmap failed
+int create_arenas(void)
+{
+    size_t arena_sizes[NUM_ARENAS] = {TINY_SIZE, SMALL_SIZE, MEDIUM_SIZE};
+
+    for (int i = 0; i < NUM_ARENAS; i++)
+    {
+        //creates memory space for each arena with respective size
+        void *temp = get_mem_block(NULL, arena_sizes[i]);
+
+        if (temp == NULL)
+        {
+            //returns 0 so function that called it knows it has failed
+            return 0;
+        }
+
+        //initialises the memory space as a list_head
+        init_free_list(temp, arena_sizes[i]);
+
+        //list_head is not global now it is specific to that arena
+        arenas[i].start = (char *)temp;
+        arenas[i].size = arena_sizes[i];
+        arenas[i].head = list_head;
+    }
+
+    return 1;
+}
+```
+
+- For each arena, we use `get_mem_block()` to request a chunk of memory from the operating system, so each arena is its own separate memory region.
+- `init_free_list()` then turns this memory into a free list with a single node like before however, we must copy `list_head` into the arena's `head` afterwards as there are multiple `list_head's`.
+- We also save the starting address and size of the arena, so that `find_arena()` can use them later.
+
+## choose_arena()
+
+This function is simple and is used to decide which arena a request should go into. It returns 0 for tiny, 1 for small and 2 for medium.
+
+```c
+// function for choosing which arena a request goes into
+int choose_arena(int byte_count)
+{
+    int total_size = byte_count + (int)sizeof(common_header_t);
+
+    if (total_size <= TINY_MAX)
+    {
+        return 0;
+    }
+    else if (total_size <= SMALL_MAX)
+    {
+        return 1;
+    }
+    else
+    {
+        return 2;
+    }
+}
+```
+
+- The request size includes the header, so we add the header size to the request first.
+- We then check which arena it fits into, starting with the smallest.
+
+
+## find_arena()
+
+This function is used by `sfree()` to work out which arena a block came from. It returns -1 if the address is not inside any of the arenas.
+
+```c
+// function for finding which arena a block belongs to, using its address
+// returns -1 if the address is not inside any of the arenas
+int find_arena(void *ptr)
+{
+    char *address = (char *)ptr;
+
+    for (int i = 0; i < NUM_ARENAS; i++)
+    {
+        // the block is in this arena if its address is between the start and the end of the arena
+        if (address >= arenas[i].start && address < arenas[i].start + arenas[i].size)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+```
+
+- `sfree()` is only given a pointer, so it does not know which arena the block was allocated from.
+- Each arena is one contiguous block of memory, so we check if the address lies between the start and the end of each arena.
+- We cast the pointer to `char *` so that `start + size` moves in single bytes
+
+
+## Changes to smalloc()
+
+```c
+void *smalloc(int byte_count)
+{
+    // the arenas on the first memory allocation call
+    if (!arenas_created)
+    {
+        if (!create_arenas())
+        {
+            return NULL;
+        }
+        arenas_created = 1;
+    }
+    int zone = choose_arena(byte_count);
+
+    // The freelist functions all use list_head, so we point it at this arena's freelist
+    list_head = arenas[zone].head;
+
+    common_header_t *previous_head = NULL;
+    common_header_t *current_head = find_best_listnode(byte_count, &previous_head);
+
+    // statement is true if no suitable node has been found
+    if (current_head == NULL)
+    {
+        return NULL;
+    }
+
+    common_header_t *replacement = split_node(current_head, byte_count);
+
+    link_previous_node(previous_head, replacement);
+    //updates list_head in case it has changed
+    arenas[zone].head = list_head;
+
+    // This gives address to the first memory location via pointer arithmetic
+    // If you didnt convert curret_head pointer to type char it would move 16x16 memory
+    return (char *)current_head + sizeof(common_header_t);
+}
+```
+
+The function still follows the three steps given in the assignment:
+
+-   **STEP 1.** On the first call, we use `create_arenas()` to create the three arenas instead of one heap. If it fails, the function returns `NULL`.
+-   **STEP 2.** We use `choose_arena()` to pick the arena for the request, and point `list_head` at that arena's free list. We then use `find_best_listnode()` to find the smallest block that fits, the same as Version 2, but only within that arena.
+-   **STEP 3.** If no block is big enough, `NULL` is returned. Otherwise `split_node()` splits the block and `link_previous_node()` connects the previous node to the remainder, the same as before.
+
+Finally, we save `list_head` back into the arena, because `link_previous_node()` changes `list_head` if the first node of the list was used.
+
+## Changes to sfree()
+
+```c
+void sfree(void *memptr)
+{
+    if (memptr == NULL)
+    {
+        return;
+    }
+
+    common_header_t *meta_head = (common_header_t *)((char *)memptr - sizeof(common_header_t));
+
+    // The block has to go back into the freelist of the arena it came from
+    int zone = find_arena(meta_head);
+    if (zone == -1)
+    {
+        return;
+    }
+    list_head = arenas[zone].head;
+
+    // This will insert the block into the list in address order
+    common_header_t *previous = insert_in_order(meta_head);
+
+    // This will join the block with any adjacent free blocks
+    merge(meta_head, previous);
+    //Updates list head in case it has changed
+    arenas[zone].head = list_head;
+}
+```
+
+-   We use `find_arena()` to find which arena the block came from, and point `list_head` at that arena's free list.
+-   If the address is not inside any arena, the pointer was not given out by `smalloc()`, so the function simply returns.
+-   The block is then inserted and merged the same as in Version 2. As each arena is a separate `mmap()` region, a block can only ever be merged with other blocks in its own arena.
+-   Finally, we save `list_head` back into the arena, as `insert_in_order()` changes it if the freed block has the lowest address.
+
+## allocator_list_dump()
+
+We updated this function to print the free list of every arena.
+
+```c
+//this function allows us to visualise the block of the free memory list
+void allocator_list_dump(void)
+{
+    char *names[NUM_ARENAS] = {"TINY", "SMALL", "MEDIUM"};
+    // prints the freelist of each arena on its own line
+    for (int i = 0; i < NUM_ARENAS; i++)
+    {
+        printf("%s: ", names[i]);
+        common_header_t *temp = arenas[i].head;
+        while (temp != NULL)
+        {
+            printf("[SIZE: %d] ----> ", (temp->size));
+            temp = temp->next;
+        }
+        printf("[NULL]\n");
+    }
+}
+```
+
+-   As there are now three free lists, the function goes through each arena and prints its free list on its own line, with the name of the arena in front.
+
+## allocator_free_mem_size()
+
+```c
+size_t allocator_free_mem_size(void)
+{
+    size_t N, F, L;
+    allocator_stats(&N, &F, &L);
+    return F;
+}
+```
+
+-   The free memory is now spread across three free lists, so instead of going through `list_head`, this function uses `allocator_stats()` and returns `F`, the total free memory in all three arenas.
+
+## allocator_zone_stats()
+
+This function is used to find the number of free blocks, the total free memory and the largest free block in a single arena.
+
+```c
+// function used by the stress test to find the stats of one arena
+// zone 0 is tiny, 1 is small and 2 is medium
+void allocator_zone_stats(int zone, size_t *N, size_t *F, size_t *L)
+{
+    list_head = arenas[zone].head;
+    freelist_stats(N, F, L);
+}
+```
+
+-   The assignment asked for the results of each arena as well as overall, so we created this function, which points `list_head` at one arena's free list and then uses `freelist_stats()` from the stress testing section.
+-   This changes `list_head`, but this does not cause a problem, as `smalloc()` and `sfree()` always point `list_head` at the correct arena before using it.
+
+## allocator_stats()
+
+We updated this function to find the overall results across all three arenas.
+
+```c
+// function used by the stress test to find the number of free blocks (N),
+// the total free memory (F) and the largest free block (L) across all three arenas
+void allocator_stats(size_t *N, size_t *F, size_t *L)
+{
+    *N = 0;
+    *F = 0;
+    *L = 0;
+
+    for (int i = 0; i < NUM_ARENAS; i++)
+    {
+        size_t zone_N, zone_F, zone_L;
+        allocator_zone_stats(i, &zone_N, &zone_F, &zone_L);
+        *N += zone_N;
+        *F += zone_F;
+
+        //the largest free block is the largest of the three arenas
+        if (zone_L > *L)
+        {
+            *L = zone_L;
+        }
+    }
+}
+```
+
+-   The number of free blocks and the free memory from each arena are added together.
+-   The largest free block is the largest of the three arenas' largest blocks. This means the overall fragmentation `1 - L/F` uses the combined `L` and `F`, as the assignment asked for.
+
+## Stress testing the arenas
+
+The original stress test only reports the overall results, so we created a copy called `stress_test_arenas.c` that also reports the results for each arena. Every part we added is marked with `// task5 addition`, and the rest of the stress test is unchanged. For each arena, it reports how many requests were sent to it, how much free memory it had at the first failure, and its free list length and fragmentation.
+
+We ran it with the default settings (10 MB in total, 50,000 requests, `LIVE` = 512) and compared it with our single heap from 4.3.
+
+<u>![Stress test results with arenas](Images/5.11.png)</u>
+
+| | 4.3 Single heap | Arenas |
+|---|---|---|
+| Successful requests | 100.00% | 75.59% |
+| Successful allocation (bytes) | 100.00% | 61.82% |
+| Requests before first failure | No failure | 405 |
+| Free memory at first failure | No failure | 3.68 MB |
+| Memory utilisation at first failure | No failure | 0.63 |
+| Bytes-to-failure turnover (BTF) | No failure | 0.64 x `MEM_SIZE` |
+| Final / maximum free list length | 75 / 90 | 103 / 123 |
+| Final / maximum external fragmentation | 0.2931 / 0.4759 | 0.3598 / 0.5750 |
+
+| Arena | Requests | Free at first failure | Final / maximum free list length | Final / maximum fragmentation |
+|---|---|---|---|---|
+| TINY | 1558 | 1023.88 KB | 1 / 7 | 0.0000 / 0.0003 |
+| SMALL | 10923 | 2735.57 KB | 23 / 30 | 0.0246 / 0.0805 |
+| MEDIUM | 37519 | 13.79 KB | 79 / 99 | 0.9269 / 0.9710 |
+
+- The arenas did worse than the single heap in the stress test. Only 75.59% of requests worked, compared to 100%, and the first failure came after only 405 requests.
+- The results for each arena show why. The stress test picks request sizes evenly between 1 byte and 32 KB, so around 75% of the requests (37,519) are bigger than 8 KB and all go to the medium arena. However, the medium arena only has 6 MB, which is 60% of the total memory.
+- At the first failure, the medium arena only had 13.79 KB free, while the tiny and small arenas still had around 3.7 MB free between them. This memory could not be used, because large requests can only go into the medium arena.
+- The tiny arena was barely used, as only 1558 requests were small enough for it. This is also why its fragmentation stayed close to 0.
+- The medium arena's fragmentation ended at 0.9269, but this is mainly because it was almost full, so the small amount of free space it had left was split into small gaps.
+
+<!-- DIAGRAM: three arena columns at the moment of the first failure. TINY almost all green, SMALL mostly green, MEDIUM almost all red. Label the 3.7 MB of unused free memory in TINY and SMALL. -->
+<u>![The three arenas at the first failure](Images/5.12.png)</u>
+
+**Important** - This shows that the arenas did not do worse because of fragmentation, but because the arena sizes do not match the mix of requests in the stress test. Arenas work best when the sizes of the arenas match the sizes of the requests being made. In the stress test most requests are large, so a single heap that can use all 10 MB for any request performed better. Our test programme earlier in this section shows the opposite situation, where many small allocations mixed with large ones caused the single heap to fail, while the arenas still succeeded.
+
+**Important** - As before, the stress test seeds its random numbers with the current time, so the results change slightly each run. We ran it three times, and the arenas were always around 75% successful, with the first failure after around 400 to 420 requests.

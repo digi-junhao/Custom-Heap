@@ -4,7 +4,6 @@
 // structure for storing information about each arena
 // stores the first address of the arena(this will NOT change), the size of the arena in bytes 
 // and the first node of the arena's freelist(this will change).
-
 typedef struct
 {
     char *start;           
