@@ -1070,40 +1070,53 @@ void allocator_stats(size_t *N, size_t *F, size_t *L)
 -   The number of free blocks and the free memory from each arena are added together.
 -   The largest free block is the largest of the three arenas' largest blocks. This means the overall fragmentation `1 - L/F` uses the combined `L` and `F`, as the assignment asked for.
 
+
 ## Stress testing the arenas
 
-The original stress test only reports the overall results, so we created a copy called `stress_test_arenas.c` that also reports the results for each arena. Every part we added is marked with `// task5 addition`, and the rest of the stress test is unchanged. For each arena, it reports how many requests were sent to it, how much free memory it had at the first failure, and its free list length and fragmentation.
+The original stress test only prints the overall results, so we made a copy called `stress_test_arenas.c` that also prints the results for each arena. We kept `MEM_SIZE` as 10 MB (the three arenas added together), so the results could be compared fairly with our single heap from 4.3.
 
-We ran it with the default settings (10 MB in total, 50,000 requests, `LIVE` = 512) and compared it with our single heap from 4.3.
-
-<u>![Stress test results with arenas](Images/5.11.png)</u>
+<u>![Stress test results with arenas](Images/image.png)</u>
 
 | | 4.3 Single heap | Arenas |
 |---|---|---|
-| Successful requests | 100.00% | 75.59% |
-| Successful allocation (bytes) | 100.00% | 61.82% |
-| Requests before first failure | No failure | 405 |
-| Free memory at first failure | No failure | 3.68 MB |
+| Successful requests | 100.00% | 75.16% |
+| Successful allocation (bytes) | 100.00% | 61.46% |
+| Requests before first failure | No failure | 398 |
+| Free memory at first failure | No failure | 3.70 MB |
 | Memory utilisation at first failure | No failure | 0.63 |
-| Bytes-to-failure turnover (BTF) | No failure | 0.64 x `MEM_SIZE` |
-| Final / maximum free list length | 75 / 90 | 103 / 123 |
-| Final / maximum external fragmentation | 0.2931 / 0.4759 | 0.3598 / 0.5750 |
+| Final / maximum external fragmentation | 0.2931 / 0.4759 | 0.3892 / 0.5746 |
 
 | Arena | Requests | Free at first failure | Final / maximum free list length | Final / maximum fragmentation |
 |---|---|---|---|---|
-| TINY | 1558 | 1023.88 KB | 1 / 7 | 0.0000 / 0.0003 |
-| SMALL | 10923 | 2735.57 KB | 23 / 30 | 0.0246 / 0.0805 |
-| MEDIUM | 37519 | 13.79 KB | 79 / 99 | 0.9269 / 0.9710 |
+| TINY | 1518 | 1023.87 KB | 1 / 7 | 0.0000 / 0.0004 |
+| SMALL | 10929 | 2752.66 KB | 26 / 33 | 0.0392 / 0.0851 |
+| MEDIUM | 37553 | 14.82 KB | 88 / 96 | 0.9415 / 0.9671 |
 
-- The arenas did worse than the single heap in the stress test. Only 75.59% of requests worked, compared to 100%, and the first failure came after only 405 requests.
-- The results for each arena show why. The stress test picks request sizes evenly between 1 byte and 32 KB, so around 75% of the requests (37,519) are bigger than 8 KB and all go to the medium arena. However, the medium arena only has 6 MB, which is 60% of the total memory.
-- At the first failure, the medium arena only had 13.79 KB free, while the tiny and small arenas still had around 3.7 MB free between them. This memory could not be used, because large requests can only go into the medium arena.
-- The tiny arena was barely used, as only 1558 requests were small enough for it. This is also why its fragmentation stayed close to 0.
-- The medium arena's fragmentation ended at 0.9269, but this is mainly because it was almost full, so the small amount of free space it had left was split into small gaps.
+**Why the arenas did worse overall**
 
-<!-- DIAGRAM: three arena columns at the moment of the first failure. TINY almost all green, SMALL mostly green, MEDIUM almost all red. Label the 3.7 MB of unused free memory in TINY and SMALL. -->
+- The arenas only managed 75.16% of requests, compared to 100% with the single heap, and the first failure came after just 398 requests.
+- When it failed, there was still 3.70 MB free, and the memory utilisation was only 0.63. So over a third of the memory was free, but the allocator still couldn't fit a 25 KB request.
+- The byte success rate (61.46%) is lower than the request success rate (75.16%). This is because nearly all the failed requests were the large ones, while the small ones still worked.
+
+**Why the medium arena ran out**
+
+- The stress test picks request sizes evenly between 1 byte and 32 KB, so about 75% of requests are above 8 KB. In our run, 37,553 of the 50,000 requests went to the medium arena.
+- The stress test keeps 512 blocks allocated at once, so about 384 of them are medium blocks at any time. These average around 20 KB, so the medium arena needs about 7.5 MB to hold them, but it only has 6 MB.
+- This is why the medium arena had only 14.82 KB left at the first failure.
+
+**Why the tiny and small arenas were wasted**
+
+- Only 1518 requests were small enough for the tiny arena, so almost all of its 1 MB was still free at the first failure.
+- The small arena had about 2.7 MB of its 3 MB still free.
+- That's about 3.7 MB of free memory which a large request couldn't use, because `choose_arena()` only ever sends large requests to the medium arena. In the single heap, any request could use any part of the 10 MB, which is why it never failed.
+
+**What the fragmentation shows**
+
+- The overall fragmentation (0.3892) is a bit higher than the single heap (0.2931). This is because `L` is the largest free block from any arena, and as the medium arena was full, the largest free block was in the small arena, which can't be used by large requests anyway.
+- Inside the tiny and small arenas, the fragmentation stayed close to 0 and the free lists were very short (1 and 26 blocks). Requests in each arena were a similar size, so freed blocks merged back together easily.
+- The medium arena's fragmentation was high (0.9415), but this was mostly because it was nearly full. The little space it had left was in small gaps between allocated blocks, so the largest free block was tiny compared to its total free memory.
+
+<!-- DIAGRAM: three arena columns at the first failure. TINY almost all green, SMALL mostly green, MEDIUM almost all red. Label the 3.7 MB of unused free memory in TINY and SMALL. -->
 <u>![The three arenas at the first failure](Images/5.12.png)</u>
 
-**Important** - This shows that the arenas did not do worse because of fragmentation, but because the arena sizes do not match the mix of requests in the stress test. Arenas work best when the sizes of the arenas match the sizes of the requests being made. In the stress test most requests are large, so a single heap that can use all 10 MB for any request performed better. Our test programme earlier in this section shows the opposite situation, where many small allocations mixed with large ones caused the single heap to fail, while the arenas still succeeded.
-
-**Important** - As before, the stress test seeds its random numbers with the current time, so the results change slightly each run. We ran it three times, and the arenas were always around 75% successful, with the first failure after around 400 to 420 requests.
+**Important** - The arenas didn't fail because of fragmentation. Inside each arena, merging still worked well. They failed because the arena sizes don't match the request sizes in the stress test, so one arena ran out while the others had plenty of space. Arenas only help when the mix of requests matches the arena sizes.
