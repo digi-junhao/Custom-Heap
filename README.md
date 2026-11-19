@@ -1,3 +1,19 @@
+
+# **Quick Access**
+
+
+[Version 1](#version-1--implement-basic-malloc-and-free)
+
+[Version 2.1 (finding the best node)](#version-21---adding-a-different-fit-algorithm)
+
+[Version 2.2 (merging)](#version-22---merging-adjacent-free-blocks)
+
+[Stress Testing Version 1 and 2](#stress-testing-all-versions)
+
+[Version 3 (Arenas)](#version-3---size-class-arenas)
+
+
+
 # Version 1 – Implement Basic Malloc() and Free()
 
 The aim of this task was to build our own versions of `malloc` and `free`, called `smalloc` and `sfree`, to virtually dynamically allocate and deallocate memory on the heap.
@@ -711,6 +727,7 @@ void freelist_stats(size_t *N, size_t *F, size_t *L)
 # Version 3 - Size-class arenas
 
 
+
 The aim of this task was to split our single heap into three separate regions of memory, called arenas. Previously, every allocation, no matter the size, was taken from the same 10 MB heap and tracked in the same free list. In this task we created three arenas, each obtained from its own `mmap()` call and each with its own free list. Every request is sent to one arena depending on its size, and we kept best-fit and merging from Version 2 inside each arena.
 
 | Arena | Request size (including the header) | Arena size |
@@ -768,7 +785,7 @@ void *big = smalloc(40000);
 **2. Inefficient Searching for a Free Block**
 
 - Also with one heap everytime you allocate memory you must search the same free list, no matter its size. Imagine the free list contains 10000 blocks of 32 bytes, and 20 blocks of 100 KB.
-- If we request 80 KB, `find_best_listnode()` has to go through all 100100 nodes to be sure it has found the smallest block that fits, even though most of the blocks are far too small for the request.
+- If we request 80 KB, `find_best_listnode()` has to go through all 10020 nodes to be sure it has found the smallest block that fits, even though most of the blocks are far too small for the request.
 - The more small and large blocks there are mixed together in the free list, the longer every request takes, as best-fit always has to check every node.
 
 
@@ -796,10 +813,10 @@ arena_t arenas[NUM_ARENAS];
 int arenas_created = 0;
 ```
 
-- `start` stores the first address of the arena and `size` stores how big it is. These never change after the arena is created, and are used later to work out which arena a freed block belongs to.
+- `start` which stores the first address of the arena and `size` stores how big it is. These **never change** after the arena is created, and are used later to work out which arena a freed block belongs to.
 - `head` points to the first node of that arena's free list. This changes every time the start of the free list changes
-- `arenas_created` makes sure the arenas are only created once. Before, we checked if `list_head` was `NULL`, but this is also true when the heap is completely full, a bug fixed now which would have caused `mmap()` to be called again to create another heap.
-- All our free list functions work on `list_head`, so rather than rewriting them, we just point `list_head` at the right arena's free list before calling them, then save it back into the arena after. This meant we could reuse all our free list functions from before.
+- `arenas_created` makes sure the arenas are only created once. Before, we checked if `list_head` was `NULL`, but this is also true when the heap is completely full. This is  a bug  which would have caused `mmap()` to be called again to create another heap.
+- All our free list functions work on `list_head`, so rather than rewriting them for each `list_head` for every arena, we just point `list_head` at the right arena's free list before calling them. We then save it back into the arena after. This meant we could reuse all our free list functions from before.
 
 <u>![The arenas array](Images/6.3.png)</u>
 
@@ -1073,7 +1090,7 @@ void allocator_stats(size_t *N, size_t *F, size_t *L)
 
 ## Stress testing the arenas
 
-The original stress test only prints the overall results, so we made a copy called `stress_test_arenas.c` that also prints the results for each arena. We kept `MEM_SIZE` as 10 MB (the three arenas added together), so the results could be compared fairly with our single heap from 4.3.
+The original stress test only prints the overall results, so we made a another test called `stress_test_arenas.c` that also prints the results for each arena. We kept `MEM_SIZE` as 10 MB (the three arenas added together), so the results could be compared fairly with our single heap from before.
 
 <u>![Stress test results with arenas](Images/image.png)</u>
 
@@ -1092,23 +1109,23 @@ The original stress test only prints the overall results, so we made a copy call
 | SMALL | 10929 | 2752.66 KB | 26 / 33 | 0.0392 / 0.0851 |
 | MEDIUM | 37553 | 14.82 KB | 88 / 96 | 0.9415 / 0.9671 |
 
-**Why the arenas did worse overall**
+**Why the arenas did worse overall?**
 
-- The arenas only managed 75.16% of requests, compared to 100% with the single heap, and the first failure came after just 398 requests.
-- When it failed, there was still 3.70 MB free, and the memory utilisation was only 0.63. So over a third of the memory was free, but the allocator still couldn't fit a 25 KB request.
-- The byte success rate (61.46%) is lower than the request success rate (75.16%). This is because nearly all the failed requests were the large ones, while the small ones still worked.
+- The arenas only managed 75.16% of requests, compared to 100% with the single heap, and the first failure came after 398 requests.
+- When it failed, there was still 3.70 MB free, and the memory utilisation was only 0.63. Over a third of the memory was free, but the allocator still couldn't fit a 25 KB request.
+- The byte success rate (61.46%) is lower than the request success rate (75.16%). This shows nearly all the failed requests were the large ones, while the small ones still worked.
 
 **Why the medium arena ran out**
 
-- The stress test picks request sizes evenly between 1 byte and 32 KB, so about 75% of requests are above 8 KB. In our run, 37,553 of the 50,000 requests went to the medium arena.
-- The stress test keeps 512 blocks allocated at once, so about 384 of them are medium blocks at any time. These average around 20 KB, so the medium arena needs about 7.5 MB to hold them, but it only has 6 MB.
+- The stress test picks request sizes evenly between 1 byte and 32 KB. This means about 75% of requests are above 8 KB. In our run, 37,553 of the 50,000 requests went to the medium arena.
+- The test keeps 512 blocks allocated at once, so about 384 of them are medium blocks at any time. The average block size in MEDIUM is 20 KB, so the medium arena needs about 7.6 MB to hold them, but it only has 6 MB.
 - This is why the medium arena had only 14.82 KB left at the first failure.
 
 **Why the tiny and small arenas were wasted**
 
-- Only 1518 requests were small enough for the tiny arena, so almost all of its 1 MB was still free at the first failure.
+- Only 1518 requests were small enough for the TINY arena, so almost all of its 1 MB was still free at the first failure.
 - The small arena had about 2.7 MB of its 3 MB still free.
-- That's about 3.7 MB of free memory which a large request couldn't use, because `choose_arena()` only ever sends large requests to the medium arena. In the single heap, any request could use any part of the 10 MB, which is why it never failed.
+- In total there was 3.7 MB of free memory which a large request couldn't use, because `choose_arena()` only ever sends large requests to the medium arena. In the single heap, any request could use any part of the 10 MB, which is why it never failed.
 
 **What the fragmentation shows**
 
@@ -1119,4 +1136,4 @@ The original stress test only prints the overall results, so we made a copy call
 <!-- DIAGRAM: three arena columns at the first failure. TINY almost all green, SMALL mostly green, MEDIUM almost all red. Label the 3.7 MB of unused free memory in TINY and SMALL. -->
 <u>![The three arenas at the first failure](Images/5.12.png)</u>
 
-**Important** - The arenas didn't fail because of fragmentation. Inside each arena, merging still worked well. They failed because the arena sizes don't match the request sizes in the stress test, so one arena ran out while the others had plenty of space. Arenas only help when the mix of requests matches the arena sizes.
+**Important** - The arenas didn't fail because of fragmentation. Inside each arena, merging still worked well. They failed because the arena sizes don't match the request sizes in the stress test, so one arena ran out while the others had plenty of space. The use of arenas only help when the mix of requests matches the arena sizes.
